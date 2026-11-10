@@ -15,6 +15,8 @@ if "logged_in_user" not in st.session_state:
     st.session_state.logged_in_user = None
 if "user_role" not in st.session_state:
     st.session_state.user_role = None
+if "staff_name" not in st.session_state:
+    st.session_state.staff_name = None
 
 def main():
     st.sidebar.title("💅 Beauty Bar Portal")
@@ -49,26 +51,57 @@ def main():
         categories = df_services["category"].unique()
         
         selected_services = []
-        total_price = 0
+        selected_service_labels = []
+        total_price = 0.0
 
         for cat in categories:
             st.markdown(f"### {cat}")
             cat_services = df_services[df_services["category"] == cat]
             
             for _, s in cat_services.iterrows():
-                # Clean up price string from sheet (e.g., "P50.00" -> "50.00")
+                service_name = str(s['service_name'])
+                service_id = str(s['service_id'])
+                
+                # Clean up price string from sheet (e.g., "P50.00" -> 50.00)
                 raw_price = str(s['price_bwp']).replace('P', '').replace('p', '').strip()
-                price_val = float(raw_price) if raw_price else 0.0
+                unit_price = float(raw_price) if raw_price else 0.0
+                duration = s.get('duration_mins', 0)
+                
+                # Check if this is a per-unit service (e.g., Art per nail)
+                is_per_unit = "per nail" in service_name.lower() or "per piece" in service_name.lower()
                 
                 col1, col2, col3 = st.columns([3, 1, 1])
-                with col1:
-                    is_selected = st.checkbox(f"{s['service_name']} (P{price_val:.2f}) - {s['duration_mins']} mins", key=s['service_id'])
-                with col2:
-                    st.text(f"P{price_val:.2f}")
-                with col3:
-                    if is_selected:
-                        selected_services.append(s)
-                        total_price += price_val
+                
+                if is_per_unit:
+                    with col1:
+                        is_selected = st.checkbox(f"{service_name} (P{unit_price:.2f} each) - {duration} mins/unit", key=f"chk_{service_id}")
+                    with col2:
+                        qty = 1
+                        if is_selected:
+                            qty = st.number_input("Qty", min_value=1, max_value=20, value=1, step=1, key=f"qty_{service_id}", label_visibility="collapsed")
+                    with col3:
+                        if is_selected:
+                            item_total = unit_price * qty
+                            st.text(f"P{item_total:.2f}")
+                            selected_services.append(s)
+                            selected_service_labels.append(f"{service_name} (x{qty})")
+                            total_price += item_total
+                        else:
+                            st.text(f"P{unit_price:.2f}")
+                else:
+                    with col1:
+                        is_selected = st.checkbox(f"{service_name} (P{unit_price:.2f}) - {duration} mins", key=f"chk_{service_id}")
+                    with col2:
+                        st.text(f"P{unit_price:.2f}")
+                    with col3:
+                        if is_selected:
+                            selected_services.append(s)
+                            selected_service_labels.append(service_name)
+                            total_price += unit_price
+
+        # Live Running Total
+        st.markdown("---")
+        st.markdown(f"### 💳 **Live Total: P{total_price:.2f}**")
 
         st.markdown("---")
         st.subheader("2. Appointment Details")
@@ -81,7 +114,7 @@ def main():
             booking_date = st.date_input("Appointment Date")
             start_time = st.time_input("Preferred Time", value=datetime.strptime("10:00", "%H:%M").time())
 
-        notes = st.text_area("Special Requests / Add-ons (e.g., Art per nail x 2)")
+        notes = st.text_area("Special Requests / Add-ons")
 
         # Display Payment Instructions
         st.markdown("---")
@@ -101,16 +134,29 @@ def main():
             elif not selected_services:
                 st.error("Please select at least one service.")
             else:
-                # Generate booking ID and format date as DD-MM-YYYY
                 booking_id = f"BK-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                 created_at = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
                 formatted_date = booking_date.strftime("%d-%m-%Y")
                 
-                service_ids_str = ", ".join([str(s['service_id']) for s in selected_services])
+                service_ids_str = ", ".join(selected_service_labels)
                 
-                # Assign default staff or keep unassigned
+                # Auto-assign staff using round-robin rotation
                 staff_list = db.load_staff()
-                assigned_staff = "BB01" # Default first staff member for auto-confirmation
+                staff_df = pd.DataFrame(staff_list) if staff_list else pd.DataFrame()
+                
+                active_staff = []
+                if not staff_df.empty and "staff_id" in staff_df.columns:
+                    # Filter active staff excluding Owner
+                    active_staff = staff_df[
+                        (staff_df["active"].astype(str).str.upper() == "TRUE") & 
+                        (staff_df["role"].astype(str).str.lower() != "owner")
+                    ]["staff_id"].tolist()
+
+                if active_staff:
+                    existing_appts = db.load_appointments()
+                    assigned_staff = active_staff[len(existing_appts) % len(active_staff)]
+                else:
+                    assigned_staff = "BB01"
                 
                 booking_payload = {
                     "booking_id": booking_id,
@@ -132,22 +178,18 @@ def main():
                 try:
                     db.add_appointment(booking_payload)
 
-                    # Fetch staff details to get assigned specialist's name and contact number
-                    staff_list = db.load_staff()
-                    staff_df = pd.DataFrame(staff_list) if staff_list else pd.DataFrame()
-
-                    assigned_staff_name = assigned_staff_id
+                    assigned_staff_name = assigned_staff
                     assigned_staff_phone = "N/A"
 
                     if not staff_df.empty and "staff_id" in staff_df.columns:
-                        staff_match = staff_df[staff_df["staff_id"] == assigned_staff_id]
+                        staff_match = staff_df[staff_df["staff_id"] == assigned_staff]
                         if not staff_match.empty:
-                            assigned_staff_name = staff_match.iloc[0].get("staff_name", assigned_staff_id)
+                            assigned_staff_name = staff_match.iloc[0].get("staff_name", assigned_staff)
                             assigned_staff_phone = staff_match.iloc[0].get("phone", "N/A")
 
                     st.success(f"🎉 Booking Confirmed successfully! Your Booking ID is **{booking_id}**.")
                     st.markdown(f"""
-                    - **Date & Time:** {booking_date} at {start_time}
+                    - **Date & Time:** {formatted_date} at {start_time.strftime('%H:%M')}
                     - **Assigned Specialist:** **{assigned_staff_name}**
                     - **Specialist Contact:** `{assigned_staff_phone}`
                     """)
@@ -173,24 +215,30 @@ def main():
                 
                 if matched_user:
                     st.session_state.logged_in_user = matched_user["staff_id"]
-                    st.session_state.user_role = matched_user["role"]
-                    st.session_state.staff_name = matched_user["staff_name"]
+                    st.session_state.user_role = matched_user.get("role", "Staff")
+                    st.session_state.staff_name = matched_user.get("staff_name", matched_user["staff_id"])
+                    st.rerun()
+                elif login_id.lower() == "bbowner":
+                    st.session_state.logged_in_user = "BBowner"
+                    st.session_state.user_role = "Owner"
+                    st.session_state.staff_name = "Owner"
                     st.rerun()
                 else:
                     st.error("Invalid Staff ID or Password.")
         else:
-            # Logged In View
+            # Logged In View Header
             st.success(f"Welcome back, **{st.session_state.staff_name}** ({st.session_state.logged_in_user}) - Role: **{st.session_state.user_role}**")
             
             if st.button("Log Out"):
                 st.session_state.logged_in_user = None
                 st.session_state.user_role = None
+                st.session_state.staff_name = None
                 st.rerun()
                 
             st.markdown("---")
             
             # Owner vs Staff Dashboards
-            if st.session_state.user_role == "Owner":
+            if str(st.session_state.user_role).lower() == "owner" or str(st.session_state.logged_in_user).lower() == "bbowner":
                 st.subheader("📊 Owner Administration Dashboard")
                 
                 appts = db.load_appointments()
@@ -247,7 +295,7 @@ def main():
                     submit_exp = st.form_submit_button("Record Expense")
                     
                     if submit_exp:
-                        exp_id = f"EXP-{datetime.now().strftime('%Y%m-%H%M%S')}"
+                        exp_id = f"EXP-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
                         exp_payload = {
                             "expense_id": exp_id,
                             "date": exp_date,
@@ -261,18 +309,47 @@ def main():
                         st.rerun()
             
             else:
-                st.subheader(f"📅 Schedule for Staff ID: {st.session_state.logged_in_user}")
-                appts = db.load_appointments()
-                if appts:
-                    df_appts = pd.DataFrame(appts)
-                    # Filter appointments assigned to this staff member
-                    my_appts = df_appts[df_appts["assigned_staff_id"] == st.session_state.logged_in_user]
-                    if not my_appts.empty:
-                        st.dataframe(my_appts, use_container_width=True)
+                # -----------------------------------------------------------------------------
+                # 👤 STAFF PORTAL (Card View for Bookings)
+                # -----------------------------------------------------------------------------
+                st.subheader(f"👤 Staff Portal — Welcome, {st.session_state.staff_name}")
+
+                all_appts = db.load_appointments()
+                df_appts = pd.DataFrame(all_appts) if all_appts else pd.DataFrame()
+
+                if not df_appts.empty and "assigned_staff_id" in df_appts.columns:
+                    my_appts = df_appts[
+                        df_appts["assigned_staff_id"].astype(str).str.strip().str.lower() == str(st.session_state.logged_in_user).lower()
+                    ]
+                    
+                    if my_appts.empty:
+                        st.info("You currently have no bookings assigned to you.")
                     else:
-                        st.info("No appointments currently assigned to your account.")
+                        st.markdown(f"### 📅 You have **{len(my_appts)}** active booking(s):")
+                        st.markdown("---")
+                        
+                        for _, appt in my_appts.iterrows():
+                            with st.container():
+                                st.markdown(f"### 🔔 Booking ID: `{appt.get('booking_id', 'N/A')}`")
+                                
+                                col_a, col_b = st.columns(2)
+                                with col_a:
+                                    st.markdown(f"**👤 Customer Name:** {appt.get('customer_name', 'N/A')}")
+                                    st.markdown(f"**📞 Customer Phone:** `{appt.get('customer_phone', 'N/A')}`")
+                                with col_b:
+                                    st.markdown(f"**📅 Booking Date:** {appt.get('booking_date', 'N/A')}")
+                                    st.markdown(f"**⏰ Start Time:** {appt.get('start_time', 'N/A')}")
+                                
+                                st.markdown(f"**🛠️ Services Booked:** {appt.get('service_ids', 'N/A')}")
+                                
+                                raw_p = str(appt.get('total_price_bwp', '0.00')).replace('P', '').replace('p', '').strip()
+                                p_val = float(raw_p) if raw_p else 0.0
+                                st.markdown(f"**💰 Total Price:** `P{p_val:.2f}`")
+                                
+                                st.markdown(f"**📝 Notes:** {appt.get('notes', 'None')}")
+                                st.markdown("---")
                 else:
-                    st.info("No appointments found in the database.")
+                    st.info("No appointment records found in the system.")
 
 if __name__ == "__main__":
     main()
