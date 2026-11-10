@@ -11,11 +11,9 @@ from datetime import datetime
 def get_gspread_client():
     """Connects to Google Sheets using Streamlit Secrets or local service_account.json"""
     if "gcp_service_account" in st.secrets:
-        # For Streamlit Community Cloud Deployment
         creds_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(creds_dict)
     elif os.path.exists("service_account.json"):
-        # For Local Development
         gc = gspread.service_account(filename="service_account.json")
     else:
         st.error("Google Sheets service account credentials not found! Please configure secrets.toml or service_account.json.")
@@ -28,37 +26,41 @@ def get_db_connection(sheet_name="Beauty Bar"):
     return gc.open(sheet_name)
 
 # -----------------------------------------------------------------------------
-# Data Access Functions (Row 4 Offset Supported)
+# Cached Data Access Functions (Prevents API Quota Limits)
 # -----------------------------------------------------------------------------
+@st.cache_data(ttl=30)
 def load_services():
-    """Loads active services starting from Row 4 headers"""
+    """Loads active services starting from Row 4 headers (Cached for 30s)"""
     sh = get_db_connection()
     worksheet = sh.worksheet("Services")
-    # head=4 tells gspread that row 4 contains the column headers
     records = worksheet.get_all_records(head=4)
     return [r for r in records if str(r.get("active", "")).upper() == "TRUE"]
 
+@st.cache_data(ttl=30)
 def load_staff():
-    """Loads staff accounts starting from Row 4 headers"""
+    """Loads staff accounts starting from Row 4 headers (Cached for 30s)"""
     sh = get_db_connection()
     worksheet = sh.worksheet("Staff")
     return worksheet.get_all_records(head=4)
 
+@st.cache_data(ttl=60)
 def load_business_info():
-    """Loads business info settings starting from Row 4 headers"""
+    """Loads business info settings starting from Row 4 headers (Cached for 60s)"""
     sh = get_db_connection()
     worksheet = sh.worksheet("Business_Info")
     records = worksheet.get_all_records(head=4)
     return {r["setting_key"]: r["setting_value"] for r in records if "setting_key" in r}
 
+@st.cache_data(ttl=15)
 def load_appointments():
-    """Loads all appointments starting from Row 4 headers"""
+    """Loads all appointments starting from Row 4 headers (Cached for 15s)"""
     sh = get_db_connection()
     worksheet = sh.worksheet("Appointments")
     return worksheet.get_all_records(head=4)
 
+@st.cache_data(ttl=15)
 def load_expenses():
-    """Loads all business expenses starting from Row 4 headers"""
+    """Loads all business expenses starting from Row 4 headers (Cached for 15s)"""
     sh = get_db_connection()
     worksheet = sh.worksheet("Expenses")
     return worksheet.get_all_records(head=4)
@@ -67,7 +69,7 @@ def load_expenses():
 # Data Insertion / Update Functions
 # -----------------------------------------------------------------------------
 def add_appointment(booking_data):
-    """Appends a new appointment row to the Appointments sheet"""
+    """Appends a new appointment row and clears cache"""
     sh = get_db_connection()
     worksheet = sh.worksheet("Appointments")
     
@@ -88,9 +90,11 @@ def add_appointment(booking_data):
         booking_data.get("notes")
     ]
     worksheet.append_row(row_values)
+    # Clear cache so new bookings show up immediately
+    st.cache_data.clear()
 
 def add_expense(expense_data):
-    """Appends a new expense record to the Expenses sheet"""
+    """Appends a new expense record and clears cache"""
     sh = get_db_connection()
     worksheet = sh.worksheet("Expenses")
     row_values = [
@@ -102,3 +106,5 @@ def add_expense(expense_data):
         expense_data.get("logged_by")
     ]
     worksheet.append_row(row_values)
+    # Clear cache so new expenses show up immediately
+    st.cache_data.clear()
