@@ -52,19 +52,23 @@ def main():
         total_price = 0
 
         for cat in categories:
-            st.markdown(f"### {cat}")
-            cat_services = df_services[df_services["category"] == cat]
-            
-            for _, s in cat_services.iterrows():
-                col1, col2, col3 = st.columns([3, 1, 1])
-                with col1:
-                    is_selected = st.checkbox(f"{s['service_name']} (P{s['price_bwp']}) - {s['duration_mins']} mins", key=s['service_id'])
-                with col2:
-                    st.text(f"P{s['price_bwp']}")
-                with col3:
-                    if is_selected:
-                        selected_services.append(s)
-                        total_price += float(s['price_bwp'])
+    st.markdown(f"### {cat}")
+    cat_services = df_services[df_services["category"] == cat]
+    
+    for _, s in cat_services.iterrows():
+        # Clean up price string from sheet (e.g., "P50.00" -> "50.00" or handle floats)
+        raw_price = str(s['price_bwp']).replace('P', '').replace('p', '').strip()
+        price_val = float(raw_price) if raw_price else 0.0
+        
+        col1, col2, col3 = st.columns([3, 1, 1])
+        with col1:
+            is_selected = st.checkbox(f"{s['service_name']} (P{price_val:.2f}) - {s['duration_mins']} mins", key=s['service_id'])
+        with col2:
+            st.text(f"P{price_val:.2f}")
+        with col3:
+            if is_selected:
+                selected_services.append(s)
+                total_price += price_val
 
         st.markdown("---")
         st.subheader("2. Appointment Details")
