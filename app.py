@@ -178,10 +178,35 @@ def main():
                 df_appts = pd.DataFrame(appts) if appts else pd.DataFrame()
                 df_expenses = pd.DataFrame(expenses) if expenses else pd.DataFrame()
                 
-                col_m1, col_m2, col_m3 = st.columns(3)
-                total_sales = df_appts["total_price_bwp"].sum() if not df_appts.empty and "total_price_bwp" in df_appts else 0
-                total_exp = df_expenses["amount_bwp"].sum() if not df_expenses.empty and "amount_bwp" in df_expenses else 0
+                # Clean and convert total_price_bwp to numeric safely
+                if not df_appts.empty and "total_price_bwp" in df_appts.columns:
+                    df_appts["total_price_bwp"] = (
+                        df_appts["total_price_bwp"]
+                        .astype(str)
+                        .str.replace("P", "", case=False)
+                        .str.replace("p", "", case=False)
+                        .str.strip()
+                    )
+                    df_appts["total_price_bwp"] = pd.to_numeric(df_appts["total_price_bwp"], errors="coerce").fillna(0)
+                    total_sales = df_appts["total_price_bwp"].sum()
+                else:
+                    total_sales = 0.0
+
+                # Clean and convert amount_bwp to numeric safely
+                if not df_expenses.empty and "amount_bwp" in df_expenses.columns:
+                    df_expenses["amount_bwp"] = (
+                        df_expenses["amount_bwp"]
+                        .astype(str)
+                        .str.replace("P", "", case=False)
+                        .str.replace("p", "", case=False)
+                        .str.strip()
+                    )
+                    df_expenses["amount_bwp"] = pd.to_numeric(df_expenses["amount_bwp"], errors="coerce").fillna(0)
+                    total_exp = df_expenses["amount_bwp"].sum()
+                else:
+                    total_exp = 0.0
                 
+                col_m1, col_m2, col_m3 = st.columns(3)
                 col_m1.metric("Total Gross Sales", f"P{total_sales:,.2f}")
                 col_m2.metric("Total Expenses", f"P{total_exp:,.2f}")
                 col_m3.metric("Net Profit", f"P{total_sales - total_exp:,.2f}")
