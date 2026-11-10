@@ -131,7 +131,28 @@ def main():
                 
                 try:
                     db.add_appointment(booking_payload)
-                    st.success(f"🎉 Booking Confirmed successfully! Your Booking ID is **{booking_id}**. We look forward to seeing you at Beauty Bar!")
+
+                    # Fetch staff details to get assigned specialist's name and contact number
+                    staff_list = db.load_staff()
+                    staff_df = pd.DataFrame(staff_list) if staff_list else pd.DataFrame()
+
+                    assigned_staff_name = assigned_staff_id
+                    assigned_staff_phone = "N/A"
+
+                    if not staff_df.empty and "staff_id" in staff_df.columns:
+                        staff_match = staff_df[staff_df["staff_id"] == assigned_staff_id]
+                        if not staff_match.empty:
+                            assigned_staff_name = staff_match.iloc[0].get("staff_name", assigned_staff_id)
+                            assigned_staff_phone = staff_match.iloc[0].get("phone", "N/A")
+
+                    st.success(f"🎉 Booking Confirmed successfully! Your Booking ID is **{booking_id}**.")
+                    st.markdown(f"""
+                    - **Date & Time:** {booking_date} at {start_time}
+                    - **Assigned Specialist:** **{assigned_staff_name}**
+                    - **Specialist Contact:** `{assigned_staff_phone}`
+                    """)
+                    st.info("Please keep a note of your specialist's contact details in case you need to reschedule or run a few minutes late. We look forward to seeing you at Beauty Bar!")
+
                 except Exception as ex:
                     st.error(f"Failed to save booking to Google Sheets: {ex}")
 
